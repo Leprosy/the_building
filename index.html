@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset=utf-8>
+        <title>Building</title>
+        <style>
+            /* body { margin: 0; }
+            canvas { width: 100%; height: 100% } */
+        </style>
+    </head>
+    <body>
+        <div id="scene"></div>
+        <hr />
+        Y (floor): <input id="" value="0" onclick="this.select()" onchange="Build.player.movey(this.value)"/>
+        X (horiz): <input id="" value="0" onclick="this.select()" onchange="Build.player.movex(this.value)"/>
+        Z (depth): <input id="" value="0" onclick="this.select()" onchange="Build.player.movez(this.value)"/>
+        <button onclick="Build.cameraControls.reset()">Reset camera</button>
+        <button onclick="Build.toggle()">Toggle oclussion</button>
+
+        <script src="js/three.js"></script>
+        <script src="js/controls.js"></script>
+        <script src="js/tweenki.js"></script>
+        <script>
+        // Namespace
+        var Build = {};
+
+        // Data
+        Build.unit = 100;
+        Build.map = [[[1, 1, 1, 1] , [1, 1, 1, 1], [1, 1, 1, 0]],
+                     [[1, 1, 1, 0] , [1, 1, 0, 0], [1, 0, 0, 0]],
+                     [[1, 1, 1, 0] , [1, 0, 0, 0], [1, 0, 0, 0]]];
+        Build.map.h = Build.map.length;
+        Build.map.x = Build.map[0].length;
+        Build.map.y = Build.map[0][0].length;
+
+        // Setup
+        Build.scene = new THREE.Scene();
+        Build.camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 10000);
+        Build.renderer = new THREE.WebGLRenderer();
+        Build.renderer.setSize(window.innerWidth * 0.8, window.innerHeight * 0.8);
+        document.getElementById("scene").appendChild(Build.renderer.domElement);
+        Build.camera.position.z = 5 * Build.unit;
+        Build.cameraControls = new THREE.TrackballControls(Build.camera, Build.renderer.domElement);
+        Build.cameraControls.zoomSpeed = Build.unit * 0.0005;
+        Build.sunLight = new THREE.AmbientLight(0xffffff, 0.4);
+        Build.pointLight = new THREE.PointLight(0xffffff, 1);
+        Build.scene.add(Build.sunLight);
+        Build.scene.add(Build.pointLight);
+
+        // Textures
+        var textureLoader = new THREE.TextureLoader();
+        Build.txt = {}
+        Build.txt.wall = textureLoader.load("img/wall.jpg");
+        Build.txt.floor = textureLoader.load("img/floor.jpg");
+        Build.txt.ceiling = textureLoader.load("img/ceiling.jpg");
+        Build.txt.wallint = textureLoader.load("img/wallint.jpg");
+        Build.txt.floor.wrapS = THREE.RepeatWrapping;
+        Build.txt.floor.wrapT = THREE.RepeatWrapping;
+        Build.txt.floor.repeat.set(6, 6);
+        Build.txt.grass = textureLoader.load("img/grass.jpg");
+        Build.txt.grass.wrapS = THREE.RepeatWrapping;
+        Build.txt.grass.wrapT = THREE.RepeatWrapping;
+        Build.txt.grass.repeat.set(10, 10);
+
+        // Meshes
+        Build.mesh = {}
+        Build.mesh.floor = new THREE.Mesh(
+                new THREE.BoxGeometry(Build.unit, Build.unit * 0.02, Build.unit),
+                new THREE.MeshLambertMaterial({ color: 0xcccccc, map: Build.txt.floor }));
+        Build.mesh.ceiling = new THREE.Mesh(
+                new THREE.BoxGeometry(Build.unit, Build.unit * 0.02, Build.unit),
+                new THREE.MeshLambertMaterial({ color: 0xcccccc, map: Build.txt.ceiling }));
+        Build.mesh.wall = new THREE.Mesh(
+                new THREE.BoxGeometry(Build.unit, Build.unit / 2, Build.unit * 0.02),
+                new THREE.MeshLambertMaterial({ color: 0xcccccc, map: Build.txt.wall }));
+        Build.mesh.wallint = new THREE.Mesh(
+                new THREE.BoxGeometry(Build.unit, Build.unit / 2, Build.unit * 0.02),
+                new THREE.MeshLambertMaterial({ color: 0xcccccc, map: Build.txt.wallint }));
+
+        // DOOR
+        var lmesh = new THREE.Mesh(new THREE.BoxGeometry(Build.unit / 8, Build.unit / 2, Build.unit * 0.02));
+        var cmesh = new THREE.Mesh(new THREE.BoxGeometry(Build.unit - Build.unit / 8, Build.unit / 8, Build.unit * 0.02));
+        var rmesh = new THREE.Mesh(new THREE.BoxGeometry(Build.unit / 8, Build.unit / 2 - Build.unit / 8, Build.unit * 0.02));
+
+        lmesh.position.x = -Build.unit * 0.44
+        cmesh.position.x = Build.unit / 2 - Build.unit  * 0.44;
+        cmesh.position.y = Build.unit / 2 - Build.unit * 0.313;
+        rmesh.position.x = Build.unit - Build.unit / 8 - Build.unit  * 0.44;
+        rmesh.position.y = -Build.unit * 0.0625;
+
+        var doorGeo = new THREE.Geometry();
+        lmesh.updateMatrix();
+        doorGeo.merge(lmesh.geometry, lmesh.matrix);
+        cmesh.updateMatrix();
+        doorGeo.merge(cmesh.geometry, cmesh.matrix);
+        rmesh.updateMatrix();
+        doorGeo.merge(rmesh.geometry, rmesh.matrix);
+        Build.mesh.door = new THREE.Mesh(doorGeo, new THREE.MeshLambertMaterial({ color: 0xcccccc, map: Build.txt.wallint }));
+
+        for (h in Build.map) {
+            var floor = Build.map[h];
+
+            for (i in floor) { //x of floor
+                for (j in floor[i]) { //y of floor
+                    if (floor[i][j] > 0) {
+                        var floorMesh = Build.mesh.floor.clone();
+                        var nwallMesh = Build.mesh.wall.clone();
+                        var lwallMesh = Build.mesh.wall.clone();
+
+                        if (j == 0) { // && floor[i - 1][j] > 0) {
+                            var nwallMesh = Build.mesh.wall.clone();
+                        } else {
+                            var nwallMesh = Build.mesh.door.clone();
+                        }
+
+                        if (i == 0) { // && floor[i - 1][j] > 0) {
+                            var lwallMesh = Build.mesh.wall.clone();
+                        } else {
+                            var lwallMesh = Build.mesh.door.clone();
+                        }
+                        lwallMesh.rotation.y = Math.PI / 2;
+
+                        floorMesh.position.copy(new THREE.Vector3(i * Build.unit, h * Build.unit / 2, j * Build.unit));
+                        nwallMesh.position.copy(new THREE.Vector3(i * Build.unit, (h * Build.unit / 2) + Build.unit / 4, j * Build.unit - Build.unit / 2));
+                        lwallMesh.position.copy(new THREE.Vector3(i * Build.unit - Build.unit / 2, (h * Build.unit / 2) + Build.unit / 4, j * Build.unit));
+
+                        Build.scene.add(floorMesh);
+                        Build.scene.add(nwallMesh);
+                        Build.scene.add(lwallMesh);
+
+                        //Last floor - ceiling
+                        if (h == Build.map.length - 1) {
+                            var ceilingMesh = Build.mesh.ceiling.clone();
+                            ceilingMesh.position.copy(new THREE.Vector3(i * Build.unit, (h * 1 + 1) * Build.unit / 2, j * Build.unit));
+                            Build.scene.add(ceilingMesh);
+                        }
+                    } else {
+                        if (h > 0 && Build.map[h - 1][i][j] == 1) {
+                            var floorMesh = Build.mesh.ceiling.clone();
+                            floorMesh.position.copy(new THREE.Vector3(i * Build.unit, h * Build.unit / 2, j * Build.unit));
+                            Build.scene.add(floorMesh);
+                        }
+                    }
+                }
+            }
+        }
+
+        // "Player"
+        Build.player = new THREE.Mesh(
+                new THREE.SphereGeometry(Build.unit / 10),
+                new THREE.MeshLambertMaterial({ color: 0x0000ff, depthTest: false }));
+        Build.player.position.y = Build.unit / 10;
+        Build.scene.add(Build.player);
+        Build.player.move = new Tweenki(Build.player.position);
+        Build.player.printMark = 0;
+        Build.player.printMarks = [];
+        Build.player.move.onUpdate(function(obj) {
+            if (Build.player.printMark % 4 == 0) {
+                var print = new THREE.Mesh(
+                        new THREE.SphereGeometry(Build.unit / 30),
+                        new THREE.MeshLambertMaterial({ color: 0xff0000, depthTest: false }));
+                print.position.copy(obj);
+                Build.player.printMarks.push(print);
+                Build.scene.add(print);
+                Build.player.printMark = 0;
+
+                if (Build.player.printMarks.length > 20) {
+                    console.log("ok");
+                    Build.scene.remove(Build.player.printMarks[0]);
+                    Build.player.printMarks.splice(0, 1);
+                }
+            }
+
+            Build.player.printMark++;
+        });
+
+        Build.player.stepy = 0;
+        Build.player.stepx = 0;
+        Build.player.stepz = 0;
+
+        Build.player.movey = function(floor) {
+            Build.player.move.to({y: floor * Build.unit / 2 + Build.unit / 10}).start();
+            Build.player.stepy = floor;
+        };
+        Build.player.movez = function(step) {
+            Build.player.move.to({z: step * Build.unit}).start();
+            Build.player.stepz = step;
+            /* if (Build.map[Build.player.stepy][Build.player.stepx][Build.player.stepz] == 0) {
+                Build.player.movey(Build.player.stepy - 1);
+            } */
+        };
+        Build.player.movex = function(step) {
+            Build.player.stepx = step;
+            Build.player.move.to({x: step * Build.unit}).start();
+        };
+        Build.toggle = function() {
+            Build.player.material.depthTest = !Build.player.material.depthTest;
+        }
+
+        // Base floor(grass)
+        var geometry = new THREE.BoxGeometry(Build.unit * 10, Build.unit * 0.05, Build.unit * 10);
+        var material = new THREE.MeshLambertMaterial({ color: 0x669966, map: Build.txt.grass });
+        var grass = new THREE.Mesh(geometry, material);
+        grass.position.y = -Build.unit * 0.05;
+        Build.scene.add(grass);
+
+        // Render cycle
+        Build.render = function () {
+            requestAnimationFrame(Build.render);
+            Build.cameraControls.update();
+            Build.pointLight.position.copy(Build.camera.position);
+            Build.renderer.render(Build.scene, Build.camera);
+        };
+
+        // Start
+        Build.render();
+        </script>
+    </body>
+</html>
